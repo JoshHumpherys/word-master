@@ -12,6 +12,8 @@ type Props = {
   styles: any
   darkMode: boolean
   toggleDarkMode: () => void
+  skipEndGameModal: boolean,
+  toggleSkipEndGameModal: () => void
   difficultyLevel: string
   setDifficultyLevel: any
   levelInstructions: string
@@ -23,6 +25,8 @@ export const SettingsModal = ({
   styles,
   darkMode,
   toggleDarkMode,
+  skipEndGameModal,
+  toggleSkipEndGameModal,
   difficultyLevel,
   setDifficultyLevel,
   levelInstructions,
@@ -91,6 +95,28 @@ export const SettingsModal = ({
               </div>
             </RadioGroup>
             <p className="text-center w-10/12 mx-auto font-medium">{levelInstructions}</p>
+
+            <Switch.Group as="div" className="flex items-center">
+              <Switch
+                checked={skipEndGameModal}
+                onChange={toggleSkipEndGameModal}
+                className={`${
+                  skipEndGameModal
+                    ? 'nm-inset-yellow-500 border-background-dark'
+                    : 'nm-inset-background border-transparent'
+                } relative inline-flex flex-shrink-0 h-8 w-14 p-1 border-2 rounded-full cursor-pointer transition ease-in-out duration-200`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`${
+                    skipEndGameModal ? 'translate-x-[1.55rem]' : 'translate-x-0'
+                  } absolute pointer-events-none inline-block top-1/2 -translate-y-1/2 h-5 w-5 shadow rounded-full bg-white transform ring-0 transition ease-in-out duration-200`}
+                />
+              </Switch>
+              <Switch.Label as="span" className="ml-3 cursor-pointer">
+                Jump to Next Puzzle On Success
+              </Switch.Label>
+            </Switch.Group>
           </div>
           <div className="flex flex-col items-center">
             <div className="mb-4">

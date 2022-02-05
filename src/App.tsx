@@ -1,5 +1,5 @@
 import { letters, status } from './constants'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { EndGameModal } from './components/EndGameModal'
 import { InfoModal } from './components/InfoModal'
@@ -28,20 +28,16 @@ const getRandomAnswer = () => {
   return answers[randomIndex].toUpperCase()
 }
 
-type State = {
-  answer: () => string
+type InitialState = {
   gameState: string
   board: string[][]
   cellStatuses: string[][]
-  currentRow: number
-  currentCol: number
-  letterStatuses: () => { [key: string]: string }
+  letterStatuses: { [key: string]: string }
   submittedInvalidWord: boolean
 }
 
 function App() {
-  const initialStates: State = {
-    answer: () => getRandomAnswer(),
+  const initialStates: InitialState = useMemo<InitialState>(() => ({
     gameState: state.playing,
     board: [
       ['', '', '', '', ''],
@@ -54,37 +50,41 @@ function App() {
     cellStatuses: Array(6).fill(Array(5).fill(status.unguessed)),
     currentRow: 0,
     currentCol: 0,
-    letterStatuses: () => {
-      const letterStatuses: { [key: string]: string } = {}
-      letters.forEach((letter) => {
-        letterStatuses[letter] = status.unguessed
-      })
-      return letterStatuses
-    },
+    letterStatuses: Object.fromEntries(letters.map((letter) => ([letter, status.unguessed]))),
     submittedInvalidWord: false,
-  }
+  }), [])
 
-  const [answer, setAnswer] = useLocalStorage('stateAnswer', initialStates.answer())
+  const [answer, setAnswer] = useLocalStorage('stateAnswer', getRandomAnswer())
   const [gameState, setGameState] = useLocalStorage('stateGameState', initialStates.gameState)
   const [board, setBoard] = useLocalStorage('stateBoard', initialStates.board)
   const [cellStatuses, setCellStatuses] = useLocalStorage(
     'stateCellStatuses',
     initialStates.cellStatuses
   )
-  const [currentRow, setCurrentRow] = useLocalStorage('stateCurrentRow', initialStates.currentRow)
-  const [currentCol, setCurrentCol] = useLocalStorage('stateCurrentCol', initialStates.currentCol)
   const [letterStatuses, setLetterStatuses] = useLocalStorage(
     'stateLetterStatuses',
-    initialStates.letterStatuses()
+    initialStates.letterStatuses
   )
   const [submittedInvalidWord, setSubmittedInvalidWord] = useLocalStorage(
     'stateSubmittedInvalidWord',
     initialStates.submittedInvalidWord
   )
 
+  const currentRow = (() => {
+    let currentRow = cellStatuses.findIndex((row) => row[0] === status.unguessed)
+    return currentRow !== -1 ? currentRow : cellStatuses.length
+  })()
+  const currentCol = (() => {
+    if (currentRow === cellStatuses.length) {
+      return -1
+    }
+    let currentCol = board[currentRow].findIndex((letter) => letter === '')
+    return currentCol !== -1 ? currentCol : board[currentRow].length
+  })()
+
   const [currentStreak, setCurrentStreak] = useLocalStorage('current-streak', 0)
   const [longestStreak, setLongestStreak] = useLocalStorage('longest-streak', 0)
-  const [modalIsOpen, setIsOpen] = useState(false)
+  const [endGameModalIsOpen, setEndGameModalIsOpen] = useState(false)
   const [firstTime, setFirstTime] = useLocalStorage('first-time', true)
   const [infoModalIsOpen, setInfoModalIsOpen] = useState(firstTime)
   const [settingsModalIsOpen, setSettingsModalIsOpen] = useState(false)
@@ -101,8 +101,6 @@ function App() {
   const eg: { [key: number]: string } = {}
   const [exactGuesses, setExactGuesses] = useLocalStorage('exact-guesses', eg)
 
-  const openModal = () => setIsOpen(true)
-  const closeModal = () => setIsOpen(false)
   const handleInfoClose = () => {
     setFirstTime(false)
     setInfoModalIsOpen(false)
@@ -111,13 +109,43 @@ function App() {
   const [darkMode, setDarkMode] = useLocalStorage('dark-mode', false)
   const toggleDarkMode = () => setDarkMode((prev: boolean) => !prev)
 
+  const [skipEndGameModal, setSkipEndGameModal] = useLocalStorage('skip-end-game-modal', true)
+  const toggleSkipEndGameModal = () => setSkipEndGameModal((prev: boolean) => !prev)
+
+  const playAgain = useCallback(() => {
+    setGameState(initialStates.gameState)
+    setBoard(initialStates.board)
+    setCellStatuses(initialStates.cellStatuses)
+    setLetterStatuses(initialStates.letterStatuses)
+    setSubmittedInvalidWord(initialStates.submittedInvalidWord)
+
+    setAnswer(getRandomAnswer())
+    setExactGuesses({})
+
+    setEndGameModalIsOpen(false)
+  }, [
+    initialStates,
+    setAnswer,
+    setGameState,
+    setBoard,
+    setCellStatuses,
+    setLetterStatuses,
+    setSubmittedInvalidWord,
+    setExactGuesses,
+  ])
+
   useEffect(() => {
     if (gameState !== state.playing) {
-      setTimeout(() => {
-        openModal()
-      }, 500)
+      if (skipEndGameModal && gameState === state.won) {
+        playAgain()
+      } else {
+        const timeout = setTimeout(() => {
+          setEndGameModalIsOpen(true)
+        }, 500)
+        return () => clearTimeout(timeout)
+      }
     }
-  }, [gameState])
+  }, [gameState, skipEndGameModal, playAgain])
 
   const getCellStyles = (rowNumber: number, colNumber: number, letter: string) => {
     if (rowNumber === currentRow) {
@@ -142,28 +170,30 @@ function App() {
   }
 
   const addLetter = (letter: string) => {
+    if (gameState !== state.playing) {
+      return
+    }
+
     setSubmittedInvalidWord(false)
     setBoard((prev: string[][]) => {
       if (currentCol > 4) {
         return prev
       }
       const newBoard = [...prev]
-      newBoard[currentRow][currentCol] = letter
+      const newRow = [...prev[currentRow]]
+      newRow[currentCol] = letter
+      newBoard[currentRow] = newRow
       return newBoard
     })
-    if (currentCol < 5) {
-      setCurrentCol((prev: number) => prev + 1)
-    }
   }
 
   // returns an array with a boolean of if the word is valid and an error message if it is not
   const isValidWord = (word: string): [boolean] | [boolean, string] => {
     if (word.length < 5) return [false, `please enter a 5 letter word`]
     if (difficultyLevel === difficulty.easy) return [true]
-    debugger
     if (!words[word.toLowerCase()]) return [false, `${word} is not a valid word. Please try again.`]
     if (difficultyLevel === difficulty.normal) return [true]
-    const guessedLetters = Object.entries(letterStatuses).filter(([letter, letterStatus]) =>
+    const guessedLetters = Object.entries(letterStatuses).filter(([_, letterStatus]) =>
       [status.yellow, status.green].includes(letterStatus)
     )
     const yellowsUsed = guessedLetters.every(([letter, _]) => word.includes(letter))
@@ -176,21 +206,19 @@ function App() {
   }
 
   const onEnterPress = () => {
-    const word = board[currentRow].join('')
-    const [valid, _err] = isValidWord(word)
-    if (!valid) {
-      console.log({ valid, _err })
-      setSubmittedInvalidWord(true)
-      // alert(_err)
+    if (gameState !== state.playing) {
       return
     }
 
-    if (currentRow === 6) return
+    const word = board[currentRow].join('')
+    const [valid, _err] = isValidWord(word)
+    if (!valid) {
+      setSubmittedInvalidWord(true)
+      return
+    }
 
     updateCellStatuses(word, currentRow)
     updateLetterStatuses(word)
-    setCurrentRow((prev: number) => prev + 1)
-    setCurrentCol(0)
   }
 
   const onDeletePress = () => {
@@ -202,8 +230,6 @@ function App() {
       newBoard[currentRow][currentCol - 1] = ''
       return newBoard
     })
-
-    setCurrentCol((prev: number) => prev - 1)
   }
 
   const updateCellStatuses = (word: string, rowNumber: number) => {
@@ -247,31 +273,36 @@ function App() {
 
   // every time cellStatuses updates, check if the game is won or lost
   useEffect(() => {
-    const cellStatusesCopy = [...cellStatuses]
-    const reversedStatuses = cellStatusesCopy.reverse()
-    const lastFilledRow = reversedStatuses.find((r) => {
-      return r[0] !== status.unguessed
-    })
+    // The game should be updated to won or lost only if it's in progress with at least one filled in row
+    if (gameState !== state.playing || cellStatuses[0][0] === status.unguessed) {
+      return
+    }
 
-    if (gameState === state.playing && lastFilledRow && isRowAllGreen(lastFilledRow)) {
+    let lastFilledRowIndex = 0
+    while (
+        lastFilledRowIndex < cellStatuses.length - 1 &&
+        cellStatuses[lastFilledRowIndex + 1][0] !== status.unguessed) {
+      lastFilledRowIndex++
+    }
+
+    if (isRowAllGreen(cellStatuses[lastFilledRowIndex])) {
       setGameState(state.won)
-
-      var streak = currentStreak + 1
-      setCurrentStreak(streak)
-      setLongestStreak((prev: number) => (streak > prev ? streak : prev))
-    } else if (gameState === state.playing && currentRow === 6) {
+      setCurrentStreak(currentStreak + 1)
+    } else if (lastFilledRowIndex === cellStatuses.length - 1) {
       setGameState(state.lost)
       setCurrentStreak(0)
     }
   }, [
     cellStatuses,
-    currentRow,
     gameState,
     setGameState,
     currentStreak,
     setCurrentStreak,
-    setLongestStreak,
   ])
+
+  useEffect(() => {
+    setLongestStreak((prev: number) => Math.max(currentStreak, prev))
+  }, [currentStreak, setLongestStreak])
 
   const updateLetterStatuses = (word: string) => {
     setLetterStatuses((prev: { [key: string]: string }) => {
@@ -290,20 +321,6 @@ function App() {
       }
       return newLetterStatuses
     })
-  }
-
-  const playAgain = () => {
-    setAnswer(initialStates.answer())
-    setGameState(initialStates.gameState)
-    setBoard(initialStates.board)
-    setCellStatuses(initialStates.cellStatuses)
-    setCurrentRow(initialStates.currentRow)
-    setCurrentCol(initialStates.currentCol)
-    setLetterStatuses(initialStates.letterStatuses())
-    setSubmittedInvalidWord(initialStates.submittedInvalidWord)
-    setExactGuesses({})
-
-    closeModal()
   }
 
   const modalStyles = {
@@ -403,8 +420,8 @@ function App() {
           styles={modalStyles}
         />
         <EndGameModal
-          isOpen={modalIsOpen}
-          handleClose={closeModal}
+          isOpen={endGameModalIsOpen}
+          handleClose={() => setEndGameModalIsOpen(false)}
           styles={modalStyles}
           darkMode={darkMode}
           gameState={gameState}
@@ -420,6 +437,8 @@ function App() {
           styles={modalStyles}
           darkMode={darkMode}
           toggleDarkMode={toggleDarkMode}
+          skipEndGameModal={skipEndGameModal}
+          toggleSkipEndGameModal={toggleSkipEndGameModal}
           difficultyLevel={difficultyLevel}
           setDifficultyLevel={setDifficultyLevel}
           levelInstructions={getDifficultyLevelInstructions()}
